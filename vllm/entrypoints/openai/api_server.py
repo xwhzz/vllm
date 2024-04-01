@@ -152,6 +152,13 @@ if __name__ == "__main__":
         served_model = args.served_model_name
     else:
         served_model = args.model
+
+    if "llava" in served_model:
+        args.image_input_type="pixel_values"
+        args.image_token_id=32000
+        args.image_input_shape="1,3,336,336"
+        args.image_feature_size=576
+
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = AsyncLLMEngine.from_engine_args(
         engine_args, usage_context=UsageContext.OPENAI_API_SERVER)

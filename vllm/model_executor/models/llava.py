@@ -65,7 +65,8 @@ class LlavaForConditionalGeneration(nn.Module):
                  linear_method: Optional["LinearMethodBase"] = None) -> None:
         super().__init__()
         self.config = config
-
+        # if vision_language_config is None:
+        #     vision_language_config = VisionLanguageConfig(image_input_type=VisionLanguageConfig.ImageInputType.PIXEL_VALUES, image_token_id=32000, image_input_shape=(1, 3, 336, 336), image_feature_size=576)
         self.vision_language_config = vision_language_config
 
         assert self.vision_language_config, (

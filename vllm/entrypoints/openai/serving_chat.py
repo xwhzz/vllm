@@ -1,6 +1,10 @@
 import codecs
 import time
 from typing import AsyncGenerator, AsyncIterator, List, Optional, Union
+import base64
+from io import BytesIO
+from PIL import Image
+from transformers import LlavaProcessor
 
 from fastapi import Request
 
@@ -16,6 +20,7 @@ from vllm.model_executor.guided_decoding import (
     get_guided_decoding_logits_processor)
 from vllm.outputs import RequestOutput
 from vllm.utils import random_uuid
+from vllm.sequence import MultiModalData
 
 logger = init_logger(__name__)
 
@@ -31,6 +36,8 @@ class OpenAIServingChat(OpenAIServing):
         super().__init__(engine=engine,
                          served_model=served_model,
                          lora_modules=lora_modules)
+        if "llava" in served_model:
+            self.processor = LlavaProcessor.from_pretrained(served_model)
         self.response_role = response_role
         self._load_chat_template(chat_template)
 
@@ -50,16 +57,28 @@ class OpenAIServingChat(OpenAIServing):
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             return error_check_ret
-
-        try:
-            prompt = self.tokenizer.apply_chat_template(
-                conversation=request.messages,
-                tokenize=False,
-                add_generation_prompt=request.add_generation_prompt)
-        except Exception as e:
-            logger.error(
-                f"Error in applying chat template from request: {str(e)}")
-            return self.create_error_response(str(e))
+        images = []
+        if isinstance(request.messages[0]["content"],list) or (len(request.messages) > 1 and isinstance(request.messages[1]["content"],list)):
+            prompt = ""
+            for mess in request.messages:
+                if mess["role"] == "user":
+                    images.append(mess["content"][1]["image_url"]["url"])
+                    prompt += "USER: " + "<image>" * 576 + "\n" + mess["content"][0]["text"] + "\n"
+                elif mess["role"] == "system":
+                    prompt += "SYSTEM: " + mess["content"] + "\n"
+                else:
+                    prompt += "ASSISTANT: " + mess["content"][0]["text"] + "\n"
+            prompt += "ASSISTANT: "
+        else:
+            try:
+                prompt = self.tokenizer.apply_chat_template(
+                    conversation=request.messages,
+                    tokenize=False,
+                    add_generation_prompt=request.add_generation_prompt)
+            except Exception as e:
+                logger.error(
+                    f"Error in applying chat template from request: {str(e)}")
+                return self.create_error_response(str(e))
 
         request_id = f"cmpl-{random_uuid()}"
         try:
@@ -77,8 +96,17 @@ class OpenAIServingChat(OpenAIServing):
                     guided_decode_logits_processor)
         except ValueError as e:
             return self.create_error_response(str(e))
-
-        result_generator = self.engine.generate(prompt, sampling_params,
+        if len(images) == 1:
+            base64_string = images[0]
+            image_data = base64.b64decode(base64_string)
+            image_stream = BytesIO(image_data)
+            image = Image.open(image_stream)
+            pixel_values = self.processor.image_processor(image, return_tensors="pt")["pixel_values"]
+            result_generator = self.engine.generate(prompt, sampling_params,
+                                                request_id, token_ids,
+                                                lora_request,multi_modal_data=MultiModalData(MultiModalData.Type.IMAGE,pixel_values))
+        else:
+            result_generator = self.engine.generate(prompt, sampling_params,
                                                 request_id, token_ids,
                                                 lora_request)
         # Streaming response

@@ -33,8 +33,10 @@ def _get_model_architecture(
     if (model_config.quantization is not None
             and "MixtralForCausalLM" in architectures):
         architectures = ["QuantMixtralForCausalLM"]
-
+    
     for arch in architectures:
+        if "llava" in arch.lower():
+            arch = "LlavaForConditionalGeneration"
         model_cls = ModelRegistry.load_model_cls(arch)
         if model_cls is not None:
             return (model_cls, arch)
